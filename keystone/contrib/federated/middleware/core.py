@@ -109,11 +109,12 @@ class FederatedAuthentication(wsgi.Middleware):
         if not 'HTTP_X_AUTHENTICATION_TYPE' in request.environ:
             return 
         if not request.environ['HTTP_X_AUTHENTICATION_TYPE'] in  ('federated'):
-            return 
+            return
+        LOG.debug('HTTP_X_AUTHENTICATION_TYPE') 
         body = request.body 
         data = jsonutils.loads(body)
-       
         if 'idpResponse' in data:
+            LOG.debug('idpResponse')
             username, expires, validatedUserAttributes = self.validate(data, data['realm'])		
             identity_api = identity.controllers.UserV3()
             user_manager = user_management.UserManager()
@@ -124,7 +125,7 @@ class FederatedAuthentication(wsgi.Middleware):
             except exception.Unauthorized:
                 user, tempPass = user_manager.manage(username, expires, updatePass=True)
                 resp['unscopedToken'], resp['tenants'] = self.mapAttributes(data, validatedUserAttributes, user, tempPass)
-            LOG.debug(resp)
+            
             return valid_Response(resp)
         elif 'auth' in data:
             LOG.debug("We just want to check the token and domain and forward the request")
@@ -152,10 +153,10 @@ class FederatedAuthentication(wsgi.Middleware):
         context['query_string'] = {}
         context['path'] = ""
         context['query_string']['service_id'] = service['id']
-        endpoints = endpoint_api.list_endpoints(context)['endpoints']
+        endpoints = endpoint_api.list_endpoints(context)
         endpoint = None
-        if not len(endpoints) < 1:
-            for e in endpoints:
+        if len(endpoints['endpoints']) > 0:
+            for e in endpoints['endpoints']:
                 if e['interface'] == 'public':
                     endpoint = e['url']
         else:
@@ -169,9 +170,10 @@ class FederatedAuthentication(wsgi.Middleware):
         context = {'is_admin': True}
         service = catalog_api.get_service(context=context, service_id=realm['id'])['service']
         type = service["type"].split('.')[1]
+
         processing_module = load_protocol_module(type)
         cred_validator = processing_module.CredentialValidator()
-        return cred_validator.validate(data['idpResponse'], service['id'])
+        return cred_validator.validate(data, service['id'])
 
     def negotiate(self, data):
         ''' Process a negotiation between an Idp and client '''
@@ -296,7 +298,10 @@ class FederatedAuthentication(wsgi.Middleware):
 def load_protocol_module(protocol):
     ''' Dynamically load correct module for processing authentication
         according to identity provider's protocol'''
-    return imp.load_source(protocol, os.path.dirname(__file__)+'/'+protocol+".py")
+    try:
+        return imp.load_source(protocol, os.path.dirname(__file__)+'/'+protocol+".py")
+    except Exception as e:
+        LOG.error(e)
         
 
 '''def filter_factory(global_conf, **local_conf):
